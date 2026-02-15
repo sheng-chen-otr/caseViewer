@@ -7,18 +7,33 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # --- CONFIGURATION ---
-st.set_page_config(layout="wide", page_title="CFD Pro Viewer v7 - Fast Scroll")
+st.set_page_config(layout="wide", page_title="CFD Pro Viewer v9")
 
 st.markdown("""
 <style>
     .reportview-container { background: #0e1117; }
     div[data-testid="stSidebar"] { background-color: #262730; }
     h1 { color: #FAFAFA; }
+    div.stButton > button:first-child {
+        background-color: #00ADB5;
+        color: white;
+        font-weight: bold;
+        border: none;
+        width: 100%;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # --- CONSTANTS ---
 OPENFOAM_BASE_DIR = "/home/openfoam/openFoam/run"
+
+# --- STATE MANAGEMENT ---
+if 'data_loaded' not in st.session_state:
+    st.session_state.data_loaded = False
+
+def reset_state():
+    """Callback to reset the view if user changes filter settings"""
+    st.session_state.data_loaded = False
 
 # --- 1. PARSING LOGIC ---
 def parse_metadata(filename):
@@ -40,7 +55,6 @@ def parse_metadata(filename):
 @st.cache_resource(show_spinner=False)
 def load_data_into_ram(root_dir, selected_cases, variable_folder):
     dataset = {}
-    # Downsample to 1000px to keep browser memory usage safe during animation
     MAX_WIDTH = 1000 
     
     progress_bar = st.progress(0, text="Loading & Pre-processing...")
@@ -75,54 +89,88 @@ def load_data_into_ram(root_dir, selected_cases, variable_folder):
     progress_bar.empty()
     return dataset
 
-# --- 3. ANIMATION ENGINE (THE FIX) ---
+# --- 3. ANIMATION ENGINE ---
 def render_animated_plot(data_sequences, case_names, mode, sync=True):
     """
-    data_sequences: dict { 'CaseName': [PIL_Images...] }
-    All sequences MUST be the same length for animation to work correctly.
+    Handles both Grid View (Subplots) and Blink Comparator (Single Plot + Toggles)
     """
-    
-    # 1. Determine Grid Layout
-    n_plots = len(case_names)
-    cols = 2 if n_plots < 4 else 3
-    rows = math.ceil(n_plots / cols)
-    
-    # 2. Setup Base Figure (First Frame)
-    fig = make_subplots(rows=rows, cols=cols, subplot_titles=case_names, 
-                        horizontal_spacing=0.01, vertical_spacing=0.05)
-    
-    # Add initial traces (Time Step 0)
-    idx = 0
-    for r in range(1, rows + 1):
-        for c in range(1, cols + 1):
-            if idx < n_plots:
-                case = case_names[idx]
-                # Get first image
-                first_img = data_sequences[case][0] if data_sequences[case] else None
-                fig.add_trace(go.Image(z=first_img), row=r, col=c)
-                idx += 1
-
-    # 3. Construct Frames (The Magic Part)
-    # We assume all cases have roughly the same number of steps. 
-    # We take the length of the first case as the master timeline.
     master_len = len(data_sequences[case_names[0]])
     frames = []
-
-    for k in range(master_len):
-        frame_data = []
-        # For this specific time step k, gather images for ALL cases
-        for case in case_names:
-            seq = data_sequences[case]
-            # Safety: if this case is shorter, use its last frame
-            img_idx = min(k, len(seq)-1)
-            frame_data.append(go.Image(z=seq[img_idx]))
+    
+    # --- MODE A: BLINK COMPARATOR ---
+    if mode == "Blink Comparator":
+        # Single Plot
+        fig = make_subplots(rows=1, cols=1)
         
-        # Create the frame object
-        frames.append(go.Frame(data=frame_data, name=str(k)))
+        # Add Initial Traces (Time 0)
+        # Trace 0 = Case A (Visible)
+        # Trace 1 = Case B (Hidden)
+        img_a_0 = data_sequences[case_names[0]][0] if data_sequences[case_names[0]] else None
+        img_b_0 = data_sequences[case_names[1]][0] if data_sequences[case_names[1]] else None
+        
+        fig.add_trace(go.Image(z=img_a_0, name=case_names[0], visible=True))
+        fig.add_trace(go.Image(z=img_b_0, name=case_names[1], visible=False))
 
+        # Build Frames (Update BOTH traces for every time step)
+        for k in range(master_len):
+            # Get image for Case A at step k
+            img_a = data_sequences[case_names[0]][min(k, len(data_sequences[case_names[0]])-1)]
+            # Get image for Case B at step k
+            img_b = data_sequences[case_names[1]][min(k, len(data_sequences[case_names[1]])-1)]
+            
+            # The frame updates data for Trace 0 AND Trace 1
+            frames.append(go.Frame(data=[go.Image(z=img_a), go.Image(z=img_b)], name=str(k)))
+
+        # Add Blink Buttons
+        buttons = [
+            dict(label=f"Show {case_names[0]}", 
+                 method="update", 
+                 args=[{"visible": [True, False]}, {"title": f"View: {case_names[0]}"}]),
+            dict(label=f"Show {case_names[1]}", 
+                 method="update", 
+                 args=[{"visible": [False, True]}, {"title": f"View: {case_names[1]}"}])
+        ]
+        
+        fig.update_layout(
+            updatemenus=[dict(type="buttons", direction="right", x=0.5, y=1.15, buttons=buttons)],
+            title_text=f"View: {case_names[0]}"
+        )
+
+    # --- MODE B: GRID / SIDE-BY-SIDE ---
+    else:
+        n_plots = len(case_names)
+        cols = 2 if n_plots < 4 else 3
+        rows = math.ceil(n_plots / cols)
+        
+        fig = make_subplots(rows=rows, cols=cols, subplot_titles=case_names, 
+                            horizontal_spacing=0.01, vertical_spacing=0.05)
+        
+        # Initial Traces
+        idx = 0
+        for r in range(1, rows + 1):
+            for c in range(1, cols + 1):
+                if idx < n_plots:
+                    case = case_names[idx]
+                    first_img = data_sequences[case][0] if data_sequences[case] else None
+                    fig.add_trace(go.Image(z=first_img), row=r, col=c)
+                    idx += 1
+
+        # Build Frames
+        for k in range(master_len):
+            frame_data = []
+            for case in case_names:
+                seq = data_sequences[case]
+                img_idx = min(k, len(seq)-1)
+                frame_data.append(go.Image(z=seq[img_idx]))
+            frames.append(go.Frame(data=frame_data, name=str(k)))
+            
+        if sync:
+            fig.update_xaxes(matches='x')
+            fig.update_yaxes(matches='y')
+
+    # --- COMMON ANIMATION CONTROLS ---
     fig.frames = frames
 
-    # 4. Add Client-Side Slider
     steps = []
     for k in range(master_len):
         steps.append(dict(
@@ -139,12 +187,8 @@ def render_animated_plot(data_sequences, case_names, mode, sync=True):
     )]
 
     fig.update_layout(sliders=sliders)
-
-    # 5. Sync & Polish
-    if sync:
-        fig.update_xaxes(matches='x')
-        fig.update_yaxes(matches='y')
     
+    # Common Polish
     fig.update_xaxes(showticklabels=False, showgrid=False, zeroline=False)
     fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, scaleanchor="x")
     fig.update_layout(height=800, margin=dict(l=10, r=10, t=50, b=10))
@@ -153,78 +197,83 @@ def render_animated_plot(data_sequences, case_names, mode, sync=True):
 
 # --- 4. MAIN APP ---
 def main():
-    st.title("🚀 CFD Pro Viewer v7 (Fast Scroll)")
+    st.title("🚀 CFD Pro Viewer v9")
 
+    # --- SIDEBAR ---
     with st.sidebar:
         st.header("1. Job Selection")
+        
         if os.path.exists(OPENFOAM_BASE_DIR):
             base_path = OPENFOAM_BASE_DIR
             available_jobs = sorted([d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))])
         else:
-            base_path = "." # Fallback for local testing
+            base_path = "." 
             available_jobs = sorted([d for d in os.listdir(".") if os.path.isdir(d)])
 
-        if not available_jobs: st.stop()
+        selected_job = st.selectbox("Select Job", available_jobs, 
+                                  index=None, placeholder="Choose a job...", on_change=reset_state)
         
-        selected_job = st.selectbox("Select Job", available_jobs)
+        if not selected_job: st.stop()
+
         cases_root = os.path.join(base_path, selected_job, "CASES")
-        
         if not os.path.exists(cases_root): st.stop()
         
         all_cases = sorted([d for d in os.listdir(cases_root) if d.isdigit() and len(d)==3])
         
-        # Mode Selection
-        mode = st.radio("Display Mode", ["Side-by-Side", "Grid View"]) # Removed Blink for animation simplicity
+        # Added Blink Comparator back to options
+        mode = st.radio("Display Mode", ["Side-by-Side", "Grid View", "Blink Comparator"], on_change=reset_state)
         
+        selected_cases = []
         if mode == "Grid View":
-            selected_cases = st.multiselect("Select Cases", all_cases, default=all_cases[:4] if len(all_cases)>=4 else all_cases)
+            selected_cases = st.multiselect("Select Cases", all_cases, default=[], placeholder="Select cases...", on_change=reset_state)
         else:
-            c1 = st.selectbox("Case A", all_cases, index=0)
-            c2_idx = 1 if len(all_cases) > 1 else 0
-            c2 = st.selectbox("Case B", all_cases, index=c2_idx)
-            selected_cases = [c1, c2]
-            
+            # Side-by-Side OR Blink Comparator (Both need exactly 2 cases usually)
+            col1, col2 = st.columns(2)
+            c1 = col1.selectbox("Case A", all_cases, index=None, placeholder="Select...", on_change=reset_state)
+            c2 = col2.selectbox("Case B", all_cases, index=None, placeholder="Select...", on_change=reset_state)
+            if c1 and c2: selected_cases = [c1, c2]
+
         if not selected_cases: st.stop()
 
-        # Variable Selection
         img_path = os.path.join(cases_root, selected_cases[0], "postProcessing", "images")
         if os.path.exists(img_path):
             avail_vars = sorted([d for d in os.listdir(img_path) if os.path.isdir(os.path.join(img_path, d))])
-            variable = st.selectbox("Variable", avail_vars)
+            variable = st.selectbox("Variable", avail_vars, index=None, placeholder="Choose variable...", on_change=reset_state)
         else: st.stop()
 
-    # Load Data
+        if not variable: st.stop()
+
+        st.divider()
+        
+        if not st.session_state.data_loaded:
+            if st.button("LOAD DATA 🚀"):
+                st.session_state.data_loaded = True
+                st.rerun()
+            else:
+                st.stop()
+
+    # --- EXECUTION ---
     dataset = load_data_into_ram(cases_root, selected_cases, variable)
 
     with st.sidebar:
         st.header("2. View Controls")
         master_case = selected_cases[0]
+        if master_case not in dataset: st.stop()
+
         available_views = sorted(list(dataset[master_case].keys()))
         view_selection = st.selectbox("Camera View", available_views)
-        
-        # Check sequence length
-        num_frames = len(dataset[master_case][view_selection])
-        st.info(f"Sequence Length: {num_frames} frames")
-        st.caption("Slider is now located below the image for instant scrolling.")
+        st.success(f"Loaded {len(dataset[master_case][view_selection])} frames.")
 
-    # Prepare Data for Animation
-    # We need a list of images for every case
     data_sequences = {}
     for case in selected_cases:
         if case in dataset and view_selection in dataset[case]:
-            # Extract just the PIL images from the (id, img) tuples
             data_sequences[case] = [item[1] for item in dataset[case][view_selection]]
         else:
             data_sequences[case] = []
 
-    # Check if we actually have data
-    if not data_sequences[selected_cases[0]]:
-        st.error("No images found for this view.")
-        st.stop()
+    if not data_sequences[selected_cases[0]]: st.stop()
 
-    # Render
-    # Note: We pass the WHOLE sequence, not just one frame
-    with st.spinner("Building Animation Bundle... (This may take a moment)"):
+    with st.spinner("Generating Animation..."):
         fig = render_animated_plot(data_sequences, selected_cases, mode)
         st.plotly_chart(fig, use_container_width=True)
 
