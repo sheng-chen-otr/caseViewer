@@ -7,19 +7,26 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # --- CONFIGURATION ---
-st.set_page_config(layout="wide", page_title="CFD Pro Viewer v9")
+st.set_page_config(layout="wide", page_title="CFD Pro Viewer v12 - Stable")
 
 st.markdown("""
 <style>
     .reportview-container { background: #0e1117; }
     div[data-testid="stSidebar"] { background-color: #262730; }
     h1 { color: #FAFAFA; }
+    /* Load Button */
     div.stButton > button:first-child {
         background-color: #00ADB5;
         color: white;
         font-weight: bold;
         border: none;
         width: 100%;
+        margin-top: 20px;
+    }
+    /* Download Button Styling */
+    .stDownloadButton > button {
+        width: 100%;
+        border: 1px solid #444;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -32,7 +39,6 @@ if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
 
 def reset_state():
-    """Callback to reset the view if user changes filter settings"""
     st.session_state.data_loaded = False
 
 # --- 1. PARSING LOGIC ---
@@ -51,13 +57,17 @@ def parse_metadata(filename):
         if nums: metadata['sort_key'] = int(nums[-1])
     return metadata
 
-# --- 2. DATA LOADING ---
+# --- 2. DATA LOADING (Server Cache) ---
 @st.cache_resource(show_spinner=False)
 def load_data_into_ram(root_dir, selected_cases, variable_folder):
+    """
+    Loads images into Server RAM.
+    Downsamples strictly for DISPLAY, but keeps path for DOWNLOAD.
+    """
     dataset = {}
-    MAX_WIDTH = 1000 
+    MAX_WIDTH = 1000  # Safe for display speed
     
-    progress_bar = st.progress(0, text="Loading & Pre-processing...")
+    progress_bar = st.progress(0, text="Loading into Server Memory...")
     
     for i, case in enumerate(selected_cases):
         path = os.path.join(root_dir, case, "postProcessing", "images", variable_folder)
@@ -74,11 +84,17 @@ def load_data_into_ram(root_dir, selected_cases, variable_folder):
             try:
                 full_path = os.path.join(path, f)
                 img = Image.open(full_path)
+                
+                # Create Display Version (Small)
                 if img.width > MAX_WIDTH:
                     ratio = MAX_WIDTH / float(img.width)
                     new_height = int((float(img.height) * float(ratio)))
-                    img = img.resize((MAX_WIDTH, new_height), Image.Resampling.LANCZOS)
-                dataset[case][view].append((meta['sort_key'], img))
+                    img_display = img.resize((MAX_WIDTH, new_height), Image.Resampling.LANCZOS)
+                else:
+                    img_display = img
+
+                # We store: (SortKey, DisplayImage, OriginalPath)
+                dataset[case][view].append((meta['sort_key'], img_display, full_path))
             except: pass
 
         for view in dataset[case]:
@@ -89,54 +105,39 @@ def load_data_into_ram(root_dir, selected_cases, variable_folder):
     progress_bar.empty()
     return dataset
 
-# --- 3. ANIMATION ENGINE ---
-def render_animated_plot(data_sequences, case_names, mode, sync=True):
+# --- 3. STATIC PLOTTING ENGINE ---
+def render_static_plot(data_map, case_names, mode, sync=True):
     """
-    Handles both Grid View (Subplots) and Blink Comparator (Single Plot + Toggles)
+    Renders a SINGLE time step.
+    data_map: { 'CaseName': PIL_Image_Object }
     """
-    master_len = len(data_sequences[case_names[0]])
-    frames = []
     
-    # --- MODE A: BLINK COMPARATOR ---
+    # --- BLINK COMPARATOR (Lightweight JS Toggle) ---
     if mode == "Blink Comparator":
-        # Single Plot
         fig = make_subplots(rows=1, cols=1)
         
-        # Add Initial Traces (Time 0)
-        # Trace 0 = Case A (Visible)
-        # Trace 1 = Case B (Hidden)
-        img_a_0 = data_sequences[case_names[0]][0] if data_sequences[case_names[0]] else None
-        img_b_0 = data_sequences[case_names[1]][0] if data_sequences[case_names[1]] else None
-        
-        fig.add_trace(go.Image(z=img_a_0, name=case_names[0], visible=True))
-        fig.add_trace(go.Image(z=img_b_0, name=case_names[1], visible=False))
+        # We only have 2 images here (Current time step for Case A and Case B)
+        # This is very light on the browser.
+        img_a = data_map.get(case_names[0])
+        img_b = data_map.get(case_names[1])
 
-        # Build Frames (Update BOTH traces for every time step)
-        for k in range(master_len):
-            # Get image for Case A at step k
-            img_a = data_sequences[case_names[0]][min(k, len(data_sequences[case_names[0]])-1)]
-            # Get image for Case B at step k
-            img_b = data_sequences[case_names[1]][min(k, len(data_sequences[case_names[1]])-1)]
-            
-            # The frame updates data for Trace 0 AND Trace 1
-            frames.append(go.Frame(data=[go.Image(z=img_a), go.Image(z=img_b)], name=str(k)))
+        if img_a: fig.add_trace(go.Image(z=img_a, name=case_names[0], visible=True))
+        if img_b: fig.add_trace(go.Image(z=img_b, name=case_names[1], visible=False)) # Hidden initially
 
-        # Add Blink Buttons
+        # JS Buttons to toggle visibility locally
         buttons = [
-            dict(label=f"Show {case_names[0]}", 
-                 method="update", 
+            dict(label=f"Show {case_names[0]}", method="update", 
                  args=[{"visible": [True, False]}, {"title": f"View: {case_names[0]}"}]),
-            dict(label=f"Show {case_names[1]}", 
-                 method="update", 
+            dict(label=f"Show {case_names[1]}", method="update", 
                  args=[{"visible": [False, True]}, {"title": f"View: {case_names[1]}"}])
         ]
         
         fig.update_layout(
             updatemenus=[dict(type="buttons", direction="right", x=0.5, y=1.15, buttons=buttons)],
-            title_text=f"View: {case_names[0]}"
+            title_text=f"Active: {case_names[0]}"
         )
 
-    # --- MODE B: GRID / SIDE-BY-SIDE ---
+    # --- GRID / SIDE-BY-SIDE ---
     else:
         n_plots = len(case_names)
         cols = 2 if n_plots < 4 else 3
@@ -145,49 +146,20 @@ def render_animated_plot(data_sequences, case_names, mode, sync=True):
         fig = make_subplots(rows=rows, cols=cols, subplot_titles=case_names, 
                             horizontal_spacing=0.01, vertical_spacing=0.05)
         
-        # Initial Traces
         idx = 0
         for r in range(1, rows + 1):
             for c in range(1, cols + 1):
                 if idx < n_plots:
                     case = case_names[idx]
-                    first_img = data_sequences[case][0] if data_sequences[case] else None
-                    fig.add_trace(go.Image(z=first_img), row=r, col=c)
+                    img = data_map.get(case)
+                    if img:
+                        fig.add_trace(go.Image(z=img), row=r, col=c)
                     idx += 1
-
-        # Build Frames
-        for k in range(master_len):
-            frame_data = []
-            for case in case_names:
-                seq = data_sequences[case]
-                img_idx = min(k, len(seq)-1)
-                frame_data.append(go.Image(z=seq[img_idx]))
-            frames.append(go.Frame(data=frame_data, name=str(k)))
-            
+        
         if sync:
             fig.update_xaxes(matches='x')
             fig.update_yaxes(matches='y')
 
-    # --- COMMON ANIMATION CONTROLS ---
-    fig.frames = frames
-
-    steps = []
-    for k in range(master_len):
-        steps.append(dict(
-            method="animate",
-            args=[[str(k)], dict(mode="immediate", frame=dict(duration=0, redraw=True), transition=dict(duration=0))],
-            label=str(k)
-        ))
-
-    sliders = [dict(
-        active=0,
-        currentvalue={"prefix": "Slice / Time: "},
-        pad={"t": 50},
-        steps=steps
-    )]
-
-    fig.update_layout(sliders=sliders)
-    
     # Common Polish
     fig.update_xaxes(showticklabels=False, showgrid=False, zeroline=False)
     fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, scaleanchor="x")
@@ -197,9 +169,9 @@ def render_animated_plot(data_sequences, case_names, mode, sync=True):
 
 # --- 4. MAIN APP ---
 def main():
-    st.title("🚀 CFD Pro Viewer v9")
+    st.title("🚀 CFD Pro Viewer v12 (Stable)")
 
-    # --- SIDEBAR ---
+    # --- SIDEBAR: SETUP ---
     with st.sidebar:
         st.header("1. Job Selection")
         
@@ -210,51 +182,49 @@ def main():
             base_path = "." 
             available_jobs = sorted([d for d in os.listdir(".") if os.path.isdir(d)])
 
-        selected_job = st.selectbox("Select Job", available_jobs, 
-                                  index=None, placeholder="Choose a job...", on_change=reset_state)
-        
+        selected_job = st.selectbox("Select Job", available_jobs, index=None, placeholder="Choose job...", on_change=reset_state)
         if not selected_job: st.stop()
 
         cases_root = os.path.join(base_path, selected_job, "CASES")
         if not os.path.exists(cases_root): st.stop()
         
         all_cases = sorted([d for d in os.listdir(cases_root) if d.isdigit() and len(d)==3])
+        if not all_cases: st.error("No cases."); st.stop()
+
+        # Variable Selection
+        master_structure_case = all_cases[0]
+        img_path = os.path.join(cases_root, master_structure_case, "postProcessing", "images")
+        avail_vars = []
+        if os.path.exists(img_path):
+            avail_vars = sorted([d for d in os.listdir(img_path) if os.path.isdir(os.path.join(img_path, d))])
         
-        # Added Blink Comparator back to options
+        variable = st.selectbox("Variable", avail_vars, index=None, placeholder="Choose variable...", key="var_select", on_change=reset_state)
+
+        # Mode Selection
         mode = st.radio("Display Mode", ["Side-by-Side", "Grid View", "Blink Comparator"], on_change=reset_state)
         
         selected_cases = []
         if mode == "Grid View":
             selected_cases = st.multiselect("Select Cases", all_cases, default=[], placeholder="Select cases...", on_change=reset_state)
         else:
-            # Side-by-Side OR Blink Comparator (Both need exactly 2 cases usually)
             col1, col2 = st.columns(2)
             c1 = col1.selectbox("Case A", all_cases, index=None, placeholder="Select...", on_change=reset_state)
             c2 = col2.selectbox("Case B", all_cases, index=None, placeholder="Select...", on_change=reset_state)
             if c1 and c2: selected_cases = [c1, c2]
 
-        if not selected_cases: st.stop()
-
-        img_path = os.path.join(cases_root, selected_cases[0], "postProcessing", "images")
-        if os.path.exists(img_path):
-            avail_vars = sorted([d for d in os.listdir(img_path) if os.path.isdir(os.path.join(img_path, d))])
-            variable = st.selectbox("Variable", avail_vars, index=None, placeholder="Choose variable...", on_change=reset_state)
-        else: st.stop()
-
-        if not variable: st.stop()
-
         st.divider()
-        
+
         if not st.session_state.data_loaded:
+            if not selected_cases or not variable: st.stop()
             if st.button("LOAD DATA 🚀"):
                 st.session_state.data_loaded = True
                 st.rerun()
-            else:
-                st.stop()
+            else: st.stop()
 
     # --- EXECUTION ---
     dataset = load_data_into_ram(cases_root, selected_cases, variable)
 
+    # --- VIEW CONTROLS (Top of Main Area for better UX) ---
     with st.sidebar:
         st.header("2. View Controls")
         master_case = selected_cases[0]
@@ -262,20 +232,61 @@ def main():
 
         available_views = sorted(list(dataset[master_case].keys()))
         view_selection = st.selectbox("Camera View", available_views)
-        st.success(f"Loaded {len(dataset[master_case][view_selection])} frames.")
+        
+        master_seq = dataset[master_case][view_selection]
+        num_frames = len(master_seq)
+        
+        # --- THE SERVER-SIDE SLIDER ---
+        st.write("---")
+        frame_index = st.slider("Slice / Time Step", 0, num_frames - 1, 0)
+        
+        # Get Info for current frame
+        current_sort_key = master_seq[frame_index][0]
+        st.caption(f"Sort Key: {current_sort_key} | Frame: {frame_index}/{num_frames-1}")
 
-    data_sequences = {}
+    # --- PREPARE SINGLE FRAME DATA ---
+    current_frame_map = {} # For Plotting (Resized)
+    download_map = {}      # For Downloading (Original Path)
+
     for case in selected_cases:
         if case in dataset and view_selection in dataset[case]:
-            data_sequences[case] = [item[1] for item in dataset[case][view_selection]]
+            seq = dataset[case][view_selection]
+            # Safety clamp
+            idx = min(frame_index, len(seq)-1)
+            
+            # Unpack: (SortKey, ImgDisplay, FullPath)
+            _, img_disp, full_path = seq[idx]
+            
+            current_frame_map[case] = img_disp
+            download_map[case] = full_path
         else:
-            data_sequences[case] = []
+            current_frame_map[case] = None
 
-    if not data_sequences[selected_cases[0]]: st.stop()
+    # --- RENDER ---
+    fig = render_static_plot(current_frame_map, selected_cases, mode)
+    st.plotly_chart(fig, use_container_width=True)
 
-    with st.spinner("Generating Animation..."):
-        fig = render_animated_plot(data_sequences, selected_cases, mode)
-        st.plotly_chart(fig, use_container_width=True)
+    # --- DOWNLOAD BUTTONS (Linked to Slider) ---
+    st.markdown("---")
+    st.subheader("📥 Download Current View (Original 4K)")
+    
+    dl_cols = st.columns(len(selected_cases))
+    
+    for i, case in enumerate(selected_cases):
+        with dl_cols[i]:
+            path = download_map.get(case)
+            if path and os.path.exists(path):
+                file_name = os.path.basename(path)
+                with open(path, "rb") as f:
+                    st.download_button(
+                        label=f"💾 {case}: {file_name}",
+                        data=f,
+                        file_name=file_name,
+                        mime="image/png",
+                        key=f"dl_{case}_{frame_index}"
+                    )
+            else:
+                st.warning(f"File not found for {case}")
 
 if __name__ == "__main__":
     main()
