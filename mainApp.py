@@ -66,7 +66,7 @@ def parse_metadata(filename):
 @st.cache_resource(show_spinner=False)
 def load_data_into_ram(root_dir, selected_cases, variable_folder):
     dataset = {}
-    MAX_WIDTH = 1200  
+    MAX_WIDTH = 800  
     
     progress_bar = st.progress(0, text="Initializing Data Loader...")
     total_steps = len(selected_cases)
