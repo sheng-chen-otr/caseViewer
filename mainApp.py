@@ -165,10 +165,13 @@ def main():
         
         if os.path.exists(OPENFOAM_BASE_DIR):
             base_path = OPENFOAM_BASE_DIR
-            available_jobs = sorted([d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))])
         else:
             base_path = "."
-            available_jobs = sorted([d for d in os.listdir(".") if os.path.isdir(d)])
+        
+        # Include both main jobs (3 digits) and subjobs (3 digits_number)
+        available_jobs = sorted([d for d in os.listdir(base_path) 
+                                if os.path.isdir(os.path.join(base_path, d)) 
+                                and (re.match(r'^\d{3}$', d) or re.match(r'^\d{3}_\d+$', d))])
 
         selected_job = st.selectbox("Select Job / Run", available_jobs, 
                                   index=None, placeholder="Choose a job...", on_change=reset_state)
