@@ -165,13 +165,10 @@ def main():
         
         if os.path.exists(OPENFOAM_BASE_DIR):
             base_path = OPENFOAM_BASE_DIR
+            available_jobs = sorted([d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))])
         else:
             base_path = "."
-        
-        # Include both main jobs (3 digits) and subjobs (3 digits_number)
-        available_jobs = sorted([d for d in os.listdir(base_path) 
-                                if os.path.isdir(os.path.join(base_path, d)) 
-                                and (re.match(r'^\d{3}$', d) or re.match(r'^\d{3}_\d+$', d))])
+            available_jobs = sorted([d for d in os.listdir(".") if os.path.isdir(d)])
 
         selected_job = st.selectbox("Select Job / Run", available_jobs, 
                                   index=None, placeholder="Choose a job...", on_change=reset_state)
@@ -185,7 +182,7 @@ def main():
 
         all_cases = sorted([d for d in os.listdir(cases_root_path) 
                             if os.path.isdir(os.path.join(cases_root_path, d)) 
-                            and d.isdigit() and len(d)==3])
+                            and (re.match(r'^\d{3}$', d) or re.match(r'^\d{3}_\d+$', d))])
         
         if not all_cases: st.error("No cases found."); st.stop()
 
