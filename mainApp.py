@@ -47,7 +47,8 @@ def reset_state():
     st.session_state.data_loaded = False
 
 # --- 1. PARSING LOGIC ---
-def parse_metadata(filename):
+def parse_metadata(filename,caseName):
+    filename = filename.replace(caseName,'')
     name_no_ext = os.path.splitext(filename)[0]
     parts = name_no_ext.split('_')
     metadata = {'view': 'Default', 'sort_key': 0, 'filename': filename}
@@ -79,7 +80,7 @@ def load_data_into_ram(root_dir, selected_cases, variable_folder):
         files = [f for f in os.listdir(path) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
         
         for f in files:
-            meta = parse_metadata(f)
+            meta = parse_metadata(f,os.path.basename(case))
             view = meta['view']
             if view not in dataset[case]: dataset[case][view] = []
             
