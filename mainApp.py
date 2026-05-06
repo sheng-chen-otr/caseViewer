@@ -210,6 +210,7 @@ def main():
             selected_cases = st.multiselect("Select Cases", all_cases, 
                                           default=[], placeholder="Select cases...", on_change=reset_state)
             selected_cases = fixSubDir(selected_cases)
+            print(selected_cases)
 
         else:
             col1, col2 = st.columns(2)
