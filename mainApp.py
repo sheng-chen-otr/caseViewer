@@ -184,16 +184,19 @@ def main():
         #                     if os.path.isdir(os.path.join(cases_root_path, d)) 
         #                     and (re.match(r'^\d{3}$', d) or re.match(r'^\d{3}_\d+$', d))])
         all_cases = []
+        all_cases_paths = []
         for dir in os.listdir(cases_root_path):
             dirPath = os.path.join(cases_root_path,dir)
             if os.path.isdir(dirPath):
-                all_cases.append(dirPath)
+                all_cases.append(dir)
                 for subdir in os.listdir(dirPath):
                     subdirPath = os.path.join(cases_root_path,dir,subdir)
                     if os.path.isdir(subdirPath):
                         if re.match(r'^\d{3}_\d+$', subdir):
-                            all_cases.append(subdirPath)
+                            all_cases.append(subdir)
         all_cases = sorted(all_cases)
+        
+        
 
         print(all_cases)
         
@@ -206,16 +209,24 @@ def main():
         if mode == "Grid View":
             selected_cases = st.multiselect("Select Cases", all_cases, 
                                           default=[], placeholder="Select cases...", on_change=reset_state)
+            selected_cases = fixSubDir(selected_cases)
+
         else:
             col1, col2 = st.columns(2)
             c1 = col1.selectbox("Case A", all_cases, index=None, placeholder="Select...", on_change=reset_state)
+            c1 = fixIndivCase(c1)
             c2 = col2.selectbox("Case B", all_cases, index=None, placeholder="Select...", on_change=reset_state)
+            c1 = fixIndivCase(c1)
+            
             if c1 and c2: selected_cases = [c1, c2]
 
         if not selected_cases: st.info("Please select cases to proceed."); st.stop()
 
         master_structure_case = all_cases[0]
-        img_path = os.path.join(cases_root_path, master_structure_case, "postProcessing", "images")
+        if '_' in master_structure_case:
+            img_path = os.path.join(cases_root_path,master_structure_case.split('_')[0],master_structure_case, "postProcessing", "images")
+        else:
+            img_path = os.path.join(cases_root_path, master_structure_case, "postProcessing", "images")
         
         avail_vars = []
         if os.path.exists(img_path):
@@ -307,6 +318,17 @@ def main():
                     )
             else:
                 st.warning(f"No file for {case}")
-
+def fixSubDir(list):
+    tmp = []
+    for case in list:
+        if '_' in list:
+            tmp.append(os.path.join(case.split('_')[0],case))
+        else:
+            tmp.append(case)
+    return tmp
+def fixIndivCase(case):
+    if '_' in case:
+        case = os.path.join(case.split('_')[0],case)
+    return case
 if __name__ == "__main__":
     main()
