@@ -185,10 +185,14 @@ def main():
         #                     and (re.match(r'^\d{3}$', d) or re.match(r'^\d{3}_\d+$', d))])
         all_cases = []
         for dir in os.listdir(cases_root_path):
-            all_cases.append(dir)
-            for subdir in os.listdir(dir):
-                if re.match(r'^\d{3}_\d+$', subdir):
-                    all_cases.append(subdir)
+            dirPath = os.path.join(cases_root_path,dir)
+            if os.path.isdir(dirPath):
+                all_cases.append(dirPath)
+                for subdir in os.listdir(dirPath):
+                    subdirPath = os.path.join(cases_root_path,dir,subdir)
+                    if os.path.isdir(subdirPath):
+                        if re.match(r'^\d{3}_\d+$', subdir):
+                            all_cases.append(subdirPath)
         all_cases = sorted(all_cases)
 
         print(all_cases)
