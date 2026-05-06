@@ -328,7 +328,7 @@ def main():
 def fixSubDir(list):
     tmp = []
     for case in list:
-        if '_' in list:
+        if '_' in case:
             tmp.append(os.path.join(case.split('_')[0],case))
         else:
             tmp.append(case)
