@@ -180,9 +180,18 @@ def main():
             st.error(f"Directory not found: {cases_root_path}")
             st.stop()
 
-        all_cases = sorted([d for d in os.listdir(cases_root_path) 
-                            if os.path.isdir(os.path.join(cases_root_path, d)) 
-                            and (re.match(r'^\d{3}$', d) or re.match(r'^\d{3}_\d+$', d))])
+        # all_cases = sorted([d for d in os.listdir(cases_root_path) 
+        #                     if os.path.isdir(os.path.join(cases_root_path, d)) 
+        #                     and (re.match(r'^\d{3}$', d) or re.match(r'^\d{3}_\d+$', d))])
+        all_cases = []
+        for dir in os.listdir(cases_root_path):
+            all_cases.append(dir)
+            for subdir in os.listdir(dir):
+                if re.match(r'^\d{3}_\d+$', subdir):
+                    all_cases.append(subdir)
+        all_cases = sorted(all_cases)
+
+        print(all_cases)
         
         if not all_cases: st.error("No cases found."); st.stop()
 
