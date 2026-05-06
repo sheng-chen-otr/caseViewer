@@ -53,7 +53,7 @@ def parse_metadata(filename,caseName):
     parts = name_no_ext.split('_')
     metadata = {'view': 'Default', 'sort_key': 0, 'filename': filename}
 
-    if len(parts) > 2: metadata['view'] = parts[2]
+    if len(parts) > 2: metadata['view'] = parts[3]
     else: metadata['view'] = parts[-1]
 
     match = re.search(r'(\d{6})', name_no_ext)
