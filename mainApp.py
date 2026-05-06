@@ -221,7 +221,7 @@ def main():
             c2 = col2.selectbox("Case B", all_cases, index=None, placeholder="Select...", on_change=reset_state)
             try:
                 c2 = fixIndivCase(c2)
-            except
+            except:
                 c2 = c2
 
             if c1 and c2: selected_cases = [c1, c2]
