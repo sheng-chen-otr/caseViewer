@@ -214,10 +214,16 @@ def main():
         else:
             col1, col2 = st.columns(2)
             c1 = col1.selectbox("Case A", all_cases, index=None, placeholder="Select...", on_change=reset_state)
-            c1 = fixIndivCase(c1)
+            try:
+                c1 = fixIndivCase(c1)
+            except:
+                c1 = c1
             c2 = col2.selectbox("Case B", all_cases, index=None, placeholder="Select...", on_change=reset_state)
-            c1 = fixIndivCase(c1)
-            
+            try:
+                c2 = fixIndivCase(c2)
+            except
+                c2 = c2
+
             if c1 and c2: selected_cases = [c1, c2]
 
         if not selected_cases: st.info("Please select cases to proceed."); st.stop()
